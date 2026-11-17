@@ -25,8 +25,11 @@ function validateConfig(c){
 const requestId = a => typeof a==='string'&&/^[A-Za-z0-9_-]{8,128}$/.test(a);
 function receipt(row){return row?{request_id:row.id,status:row.status,message_id:row.message_id??null,created_at:row.created_at,updated_at:row.updated_at}: {status:'not_found'};}
 function argsValid(a,fields){return a&&typeof a==='object'&&!Array.isArray(a)&&Object.keys(a).every(k=>fields.includes(k));}
+// Workers does not implement redirect:'error'; manual + a status check refuses
+// redirects without failing before the initial request or forwarding credentials.
 async function telegramCall(env,c,fetcher,method,payload){
- const r=await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{method:'POST',redirect:'error',headers:{'content-type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(c.timeoutMs)});
+ const r=await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{method:'POST',redirect:'manual',headers:{'content-type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(c.timeoutMs)});
+ if(r.status>=300&&r.status<400)throw Error('Telegram redirect refused');
  const data=await r.json();if(!r.ok||data.ok!==true)throw Error('Telegram retrieval failed');return data.result;
 }
 async function syncInbox(env,c,fetcher){
@@ -115,7 +118,8 @@ export function createWorker(c=configuration,fetcher=fetch){
         }else{
           let status='unknown',messageId=null,errorCode=null;
           try{
-            const response=await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:'POST',redirect:'error',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:d.chatId,text:a.text,link_preview_options:{is_disabled:true},...(d.threadId?{message_thread_id:d.threadId}:{})}),signal:AbortSignal.timeout(c.timeoutMs)});
+            const response=await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:'POST',redirect:'manual',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:d.chatId,text:a.text,link_preview_options:{is_disabled:true},...(d.threadId?{message_thread_id:d.threadId}:{})}),signal:AbortSignal.timeout(c.timeoutMs)});
+            if(response.status>=300&&response.status<400)throw Error('Telegram redirect refused');
             const data=await response.json();
             if(response.ok&&data.ok===true&&Number.isSafeInteger(data.result?.message_id)){status='sent';messageId=data.result.message_id;}
             else if(data.ok===false){status='rejected';errorCode=Number.isInteger(data.error_code)?data.error_code:null;}

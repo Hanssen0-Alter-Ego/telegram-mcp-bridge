@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "plugin:build": "node scripts/package-private-plugin.mjs"
+    "plugin:build": "node scripts/package-private-plugin.mjs",
+    "test:workerd": "node scripts/test-workerd.mjs"
   }
 }
