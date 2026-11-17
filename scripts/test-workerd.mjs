@@ -14,6 +14,7 @@ try {
  const {mkdir}=await import('node:fs/promises');await mkdir(join(directory,'config'));await mkdir(join(directory,'worker'));
  await copyFile(join(directory,'index.js'),join(directory,'worker/index.js'));
  await copyFile(new URL('../worker/attachments.js',import.meta.url),join(directory,'worker/attachments.js'));
+ await copyFile(new URL('../worker/diagnostics.js',import.meta.url),join(directory,'worker/diagnostics.js'));
  await copyFile(join(directory,'destinations.js'),join(directory,'config/destinations.js'));
  await copyFile(join(directory,'handler.js'),join(directory,'worker/handler.js'));
  const socket=createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));
@@ -24,6 +25,7 @@ services = [
 (name="worker/handler.js",esModule=embed "worker/handler.js"),
 (name="worker/index.js",esModule=embed "worker/index.js"),
 (name="worker/attachments.js",esModule=embed "worker/attachments.js"),
+(name="worker/diagnostics.js",esModule=embed "worker/diagnostics.js"),
 (name="config/destinations.js",esModule=embed "config/destinations.js")
 ])),
 (name="mock",worker=(compatibilityDate="2026-10-26",modules=[(name="upstream.js",esModule=embed "upstream.js")]))

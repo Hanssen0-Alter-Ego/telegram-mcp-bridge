@@ -1,3 +1,4 @@
+import {rejectionDiagnostic,receiptDiagnostic} from './diagnostics.js';
 // Bounded inline uploads: no arbitrary URL fetch, filesystem read or durable blob storage.
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_ATTACHMENT_BASE64 = 4 * Math.ceil(MAX_ATTACHMENT_BYTES / 3);
@@ -38,9 +39,9 @@ export async function sendAttachment(a,user,env,c,fetcher,output){
  if(claim.meta.changes!==1){
   const row=await env.DB.prepare('SELECT * FROM deliveries WHERE owner=? AND id=?').bind(user,a.request_id).first();
   if(!row||row.fingerprint!==fingerprint)throw Error('Request ID already used with different content');
-  return output({request_id:a.request_id,status:row.status,message_id:row.message_id??null,kind,duplicate:true,...(['pending','unknown'].includes(row.status)?{do_not_retry:true}:{})},row.status!=='sent');
+  return output({request_id:a.request_id,status:row.status,message_id:row.message_id??null,kind,...receiptDiagnostic(row),duplicate:true,...(['pending','unknown'].includes(row.status)?{do_not_retry:true}:{})},row.status!=='sent');
  }
- let status='unknown',messageId=null,errorCode=null;
+ let status='unknown',messageId=null,errorCode=null,errorReason=null;
  try{
   const form=new FormData();form.set('chat_id',d.chatId);if(d.threadId)form.set('message_thread_id',String(d.threadId));
   form.set(kind,new Blob([bytes],{type:a.mime_type}),a.filename);
@@ -51,9 +52,9 @@ export async function sendAttachment(a,user,env,c,fetcher,output){
   if(response.status>=300&&response.status<400)throw Error('Redirect refused');
   const data=await response.json(),m=data.result;
   if(response.ok&&data.ok===true&&Number.isSafeInteger(m?.message_id)&&m.message_id>0&&String(m.chat?.id)===d.chatId&&(m.message_thread_id??0)===(d.threadId??0)){status='sent';messageId=m.message_id;}
-  else if(data.ok===false){status='rejected';errorCode=Number.isInteger(data.error_code)?data.error_code:null;}
+  else if(data.ok===false){status='rejected';const diagnostic=rejectionDiagnostic(data);errorCode=diagnostic.telegram_error_code;errorReason=diagnostic.telegram_error_reason;}
  }catch{/* Never log media bytes, filenames, captions, credentials or remote errors. */}
- try{await env.DB.prepare('UPDATE deliveries SET status=?,message_id=?,updated_at=? WHERE owner=? AND id=?').bind(status,messageId,new Date().toISOString(),user,a.request_id).run();}
+ try{await env.DB.prepare('UPDATE deliveries SET status=?1,message_id=?2,updated_at=?3,telegram_error_code=?6,telegram_error_reason=?7 WHERE owner=?4 AND id=?5').bind(status,messageId,new Date().toISOString(),user,a.request_id,errorCode,errorReason).run();}
  catch{return output({request_id:a.request_id,status:'unknown',receipt_save_failed:true,do_not_retry:true},true);}
- return output({request_id:a.request_id,status,message_id:messageId,kind,...(errorCode?{telegram_error_code:errorCode}:{}),...(status==='unknown'?{do_not_retry:true}:{})},status!=='sent');
+ return output({request_id:a.request_id,status,message_id:messageId,kind,...(errorCode?{telegram_error_code:errorCode}:{}),...(errorReason?{telegram_error_reason:errorReason}:{}),...(status==='unknown'?{do_not_retry:true}:{})},status!=='sent');
 }

@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {createWorker} from '../worker/index.js';
 class DB {
- constructor(){this.s=new DatabaseSync(':memory:');for(const p of ['0000_delivery_receipts','0004_message_edits'])this.s.exec(readFileSync(new URL(`../drizzle/${p}.sql`,import.meta.url),'utf8'));}
+ constructor(){this.s=new DatabaseSync(':memory:');for(const p of ['0000_delivery_receipts','0004_message_edits','0005_delivery_diagnostics'])this.s.exec(readFileSync(new URL(`../drizzle/${p}.sql`,import.meta.url),'utf8'));}
  prepare(sql){const make=args=>({bind:(...a)=>make(a),first:async()=>this.s.prepare(sql).get(...args),run:async()=>({meta:{changes:Number(this.s.prepare(sql).run(...args).changes)}})});return make([]);}
  async batch(items){this.s.exec('BEGIN');try{const r=[];for(const i of items)r.push(await i.run());this.s.exec('COMMIT');return r;}catch(e){this.s.exec('ROLLBACK');throw e;}}
 }
@@ -78,4 +78,9 @@ test('edit receipt cannot become an editable source, and cannot be replayed as s
  const {w,env,seen}=await setup();await call(w,env,edit);
  assert.ok((await call(w,env,{...edit,original_request_id:edit.request_id,original_text:edit.text,original_parse_mode:'HTML',request_id:'edit-0002'})).error);
  assert.match((await call(w,env,{...send,request_id:edit.request_id},'telegram_send')).error,/different content/);assert.equal(seen.length,1);
+});
+test('edit failure reason persists in isolated receipt without raw description',async()=>{
+ const {w,env}=await setup(async()=>Response.json({ok:false,error_code:400,description:"Bad Request: can't parse entities: PRIVATE input"},{status:400}));
+ const x=await call(w,env,edit);assert.equal(x.telegram_error_reason,'invalid_caption_format');
+ const r=await call(w,env,{request_id:edit.request_id},'telegram_receipt');assert.equal(r.telegram_error_reason,'invalid_caption_format');assert.equal(r.telegram_error_code,400);assert.ok(!JSON.stringify(r).includes('PRIVATE'));
 });

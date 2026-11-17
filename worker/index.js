@@ -1,3 +1,4 @@
+import {rejectionDiagnostic,receiptDiagnostic} from './diagnostics.js';
 import {attachmentTool,sendAttachment,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENT_BASE64} from './attachments.js';
 import configuration from '../config/destinations.js';
 
@@ -26,7 +27,7 @@ function validateConfig(c){
   if(!Number.isInteger(c.maxTextLength)||c.maxTextLength<1||c.maxTextLength>4096||!Number.isInteger(c.timeoutMs)||c.timeoutMs<1000||c.timeoutMs>30000)throw Error('Invalid limits');
 }
 const requestId = a => typeof a==='string'&&/^[A-Za-z0-9_-]{8,128}$/.test(a);
-function receipt(row){return row?{request_id:row.id,status:row.status,message_id:row.message_id??null,created_at:row.created_at,updated_at:row.updated_at}: {status:'not_found'};}
+function receipt(row){return row?{request_id:row.id,status:row.status,message_id:row.message_id??null,created_at:row.created_at,updated_at:row.updated_at,...receiptDiagnostic(row)}: {status:'not_found'};}
 function argsValid(a,fields){return a&&typeof a==='object'&&!Array.isArray(a)&&Object.keys(a).every(k=>fields.includes(k));}
 // Workers does not implement redirect:'error'; manual + a status check refuses
 // redirects without failing before the initial request or forwarding credentials.
@@ -101,20 +102,20 @@ async function editMessage(a,user,env,c,fetcher){
   await env.DB.prepare("UPDATE deliveries SET status='rejected',updated_at=? WHERE owner=? AND id=?").bind(new Date().toISOString(),user,a.request_id).run();
   return output({request_id:a.request_id,status:'rejected',operation:'edit',error:'Another edit is pending or unknown; inspect its receipt before changing this message'},true);
  }
- let status='unknown',errorCode=null;
+ let status='unknown',errorCode=null,errorReason=null;
  try{
   const response=await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/editMessageText`,{method:'POST',redirect:'manual',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:target.chat_id,message_id:target.message_id,text:a.text,...(a.parse_mode!==undefined?{parse_mode:a.parse_mode}:{}),link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(c.timeoutMs)});
   if(response.status>=300&&response.status<400)throw Error('Telegram redirect refused');
   const data=await response.json();
   if(response.ok&&data.ok===true&&data.result?.message_id===target.message_id&&String(data.result?.chat?.id)===target.chat_id)status='sent';
-  else if(data.ok===false){status='rejected';errorCode=Number.isInteger(data.error_code)?data.error_code:null;}
+  else if(data.ok===false){status='rejected';const diagnostic=rejectionDiagnostic(data);errorCode=diagnostic.telegram_error_code;errorReason=diagnostic.telegram_error_reason;}
  }catch{/* Do not log credentials, bodies, or token-bearing URLs. */}
  try{
-  const updates=[env.DB.prepare('UPDATE deliveries SET status=?,message_id=?,updated_at=? WHERE owner=? AND id=?').bind(status,target.message_id,new Date().toISOString(),user,a.request_id)];
+  const updates=[env.DB.prepare('UPDATE deliveries SET status=?1,message_id=?2,updated_at=?3,telegram_error_code=?6,telegram_error_reason=?7 WHERE owner=?4 AND id=?5').bind(status,target.message_id,new Date().toISOString(),user,a.request_id,errorCode,errorReason)];
   if(status!=='unknown')updates.push(env.DB.prepare('UPDATE edit_targets SET active_edit_id=NULL WHERE owner=? AND original_request_id=? AND active_edit_id=?').bind(user,a.original_request_id,a.request_id));
   await env.DB.batch(updates);
  }catch{return output({request_id:a.request_id,status:'unknown',operation:'edit',receipt_save_failed:true,do_not_retry:true},true);}
- return output({request_id:a.request_id,status,operation:'edit',original_request_id:a.original_request_id,message_id:target.message_id,...(errorCode?{telegram_error_code:errorCode}:{}),...(status==='unknown'?{do_not_retry:true}:{})},status!=='sent');
+ return output({request_id:a.request_id,status,operation:'edit',original_request_id:a.original_request_id,message_id:target.message_id,...(errorCode?{telegram_error_code:errorCode}:{}),...(errorReason?{telegram_error_reason:errorReason}:{}),...(status==='unknown'?{do_not_retry:true}:{})},status!=='sent');
 }
 
 export function createWorker(c=configuration,fetcher=fetch){
@@ -134,16 +135,20 @@ export function createWorker(c=configuration,fetcher=fetch){
   if(body.method.startsWith('notifications/'))return new Response(null,{status:204});
   let result;
   if(body.method==='server/discover') result={supportedVersions:['2026-07-28'],capabilities:{tools:{}}};
-  else if(body.method==='initialize')result={protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'telegram-send',version:'0.4.0'}};
+  else if(body.method==='initialize')result={protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'telegram-send',version:'0.4.1'}};
   else if(body.method==='ping')result={};
   else if(body.method==='tools/list')result={tools};
   else if(body.method==='tools/call'){
     const {name,arguments:a={}}=body.params??{};
     const user=req.headers.get('oai-authenticated-user-id');
     try{
+      if(['telegram_send','telegram_edit','telegram_send_attachment'].includes(name)&&env.DB){
+        try{await env.DB.prepare('SELECT telegram_error_code,telegram_error_reason FROM deliveries LIMIT 0').bind().first();}
+        catch{throw Error('Apply delivery diagnostics migration before sending');}
+      }
       if(name==='telegram_status'){
         if(!argsValid(a,[]))throw Error('Invalid arguments');
-        result=output({enabled:c.enabled,token_configured:Boolean(env.TELEGRAM_BOT_TOKEN),receipt_store_configured:Boolean(env.DB),ready:c.enabled&&Boolean(env.TELEGRAM_BOT_TOKEN)&&Boolean(env.DB)&&Object.keys(c.destinations).length>0,caller_id:user,destinations:Object.entries(c.destinations).filter(([,d])=>d.allowedCallerIds.includes(user)).map(([alias,d])=>({alias,description:d.description,purpose:d.purpose,can_read:d.canRead,can_send:d.canSend})),plain_text_only:false,supported_parse_modes:['HTML','MarkdownV2'],default_format:'plain_text',editing_supported:true,first_edit_requires_original_text:true,attachments_supported:true,max_attachment_bytes:MAX_ATTACHMENT_BYTES,attachment_transport:'inline_base64',attachment_kinds:['auto','photo','video','audio','document']});
+        result=output({enabled:c.enabled,token_configured:Boolean(env.TELEGRAM_BOT_TOKEN),receipt_store_configured:Boolean(env.DB),ready:c.enabled&&Boolean(env.TELEGRAM_BOT_TOKEN)&&Boolean(env.DB)&&Object.keys(c.destinations).length>0,caller_id:user,destinations:Object.entries(c.destinations).filter(([,d])=>d.allowedCallerIds.includes(user)).map(([alias,d])=>({alias,description:d.description,purpose:d.purpose,can_read:d.canRead,can_send:d.canSend})),plain_text_only:false,supported_parse_modes:['HTML','MarkdownV2'],default_format:'plain_text',editing_supported:true,first_edit_requires_original_text:true,safe_error_diagnostics:true,attachments_supported:true,max_attachment_bytes:MAX_ATTACHMENT_BYTES,attachment_transport:'inline_base64',attachment_kinds:['auto','photo','video','audio','document']});
       }else if(name==='telegram_receipt'){
         if(!argsValid(a,['request_id'])||!requestId(a.request_id))throw Error('Invalid arguments');
         if(!env.DB)throw Error('Receipt store not configured');
@@ -175,20 +180,20 @@ export function createWorker(c=configuration,fetcher=fetch){
           if(!row||row.fingerprint!==fingerprint)throw Error('Request ID already used with different content');
           result=output({...receipt(row),duplicate:true},row.status!=='sent');
         }else{
-          let status='unknown',messageId=null,errorCode=null;
+          let status='unknown',messageId=null,errorCode=null,errorReason=null;
           try{
             const response=await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:'POST',redirect:'manual',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:d.chatId,text:a.text,...(a.parse_mode!==undefined?{parse_mode:a.parse_mode}:{}),link_preview_options:{is_disabled:true},...(d.threadId?{message_thread_id:d.threadId}:{})}),signal:AbortSignal.timeout(c.timeoutMs)});
             if(response.status>=300&&response.status<400)throw Error('Telegram redirect refused');
             const data=await response.json();
             if(response.ok&&data.ok===true&&Number.isSafeInteger(data.result?.message_id)){status='sent';messageId=data.result.message_id;}
-            else if(data.ok===false){status='rejected';errorCode=Number.isInteger(data.error_code)?data.error_code:null;}
+            else if(data.ok===false){status='rejected';const diagnostic=rejectionDiagnostic(data);errorCode=diagnostic.telegram_error_code;errorReason=diagnostic.telegram_error_reason;}
           }catch{/* Never log an exception containing a token-bearing URL. */}
-          try{await env.DB.prepare('UPDATE deliveries SET status=?, message_id=?, updated_at=? WHERE owner=? AND id=?').bind(status,messageId,new Date().toISOString(),user,a.request_id).run();}
+          try{await env.DB.prepare('UPDATE deliveries SET status=?1, message_id=?2, updated_at=?3,telegram_error_code=?6,telegram_error_reason=?7 WHERE owner=?4 AND id=?5').bind(status,messageId,new Date().toISOString(),user,a.request_id,errorCode,errorReason).run();}
           catch{return json({jsonrpc:'2.0',id,result:output({request_id:a.request_id,status:'unknown',receipt_save_failed:true,do_not_retry:true},true)});}
-          result=output({request_id:a.request_id,status,message_id:messageId,...(errorCode?{telegram_error_code:errorCode}:{}),...(status==='unknown'?{do_not_retry:true}:{})},status!=='sent');
+          result=output({request_id:a.request_id,status,message_id:messageId,...(errorCode?{telegram_error_code:errorCode}:{}),...(errorReason?{telegram_error_reason:errorReason}:{}),...(status==='unknown'?{do_not_retry:true}:{})},status!=='sent');
         }
       }else throw Error('Unknown tool');
-    }catch(e){result=output({error:['Invalid attachment arguments or destination not allowed','Invalid arguments','Invalid arguments or destination not allowed','Receipt store not configured','Sending is not configured','Request ID already used with different content','Unknown tool'].includes(e.message)?e.message:'Operation failed; inspect receipt before retrying'},true);}
+    }catch(e){result=output({error:['Apply delivery diagnostics migration before sending','Invalid attachment arguments or destination not allowed','Invalid arguments','Invalid arguments or destination not allowed','Receipt store not configured','Sending is not configured','Request ID already used with different content','Unknown tool'].includes(e.message)?e.message:'Operation failed; inspect receipt before retrying'},true);}
   }else return json({jsonrpc:'2.0',id,error:{code:-32601,message:'Method not found'}});
   return json({jsonrpc:'2.0',id,result});
  }};

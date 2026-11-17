@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import {createWorker} from '../worker/index.js';
 import {MAX_ATTACHMENT_BYTES} from '../worker/attachments.js';
 class DB {
- constructor(){this.s=new DatabaseSync(':memory:');this.s.exec(readFileSync(new URL('../drizzle/0000_delivery_receipts.sql',import.meta.url),'utf8'));}
+ constructor(){this.s=new DatabaseSync(':memory:');this.s.exec(readFileSync(new URL('../drizzle/0000_delivery_receipts.sql',import.meta.url),'utf8'));this.s.exec(readFileSync(new URL('../drizzle/0005_delivery_diagnostics.sql',import.meta.url),'utf8'));}
  prepare(sql){const make=args=>({bind:(...a)=>make(a),first:async()=>this.s.prepare(sql).get(...args),run:async()=>({meta:{changes:Number(this.s.prepare(sql).run(...args).changes)}})});return make([]);}
 }
 const destination={chatId:'-10099',threadId:12,description:'Test',purpose:'Offline tests',canRead:true,canSend:true,allowedCallerIds:['alice']};
@@ -55,4 +55,24 @@ test('revoked permission/disabled config and changed topic respect existing rece
 });
 test('accepts exact decoded size boundary without regex stack exhaustion',async()=>{
  const {call,seen}=setup();const data_base64=Buffer.alloc(MAX_ATTACHMENT_BYTES,65).toString('base64');assert.equal((await call({...base,data_base64})).status,'sent');assert.equal(seen.length,1);assert.equal(seen[0][1].body.get('document').size,MAX_ATTACHMENT_BYTES);
+});
+test('safe rejection reason persists in receipt and duplicate without another send',async()=>{
+ const {call,seen,env}=setup(()=>Response.json({ok:false,error_code:400,description:'Bad Request: IMAGE_PROCESS_FAILED'},{status:400}));
+ const result=await call();assert.equal(result.telegram_error_reason,'image_processing_failed');assert.equal(result.telegram_error_code,400);
+ const receipt=await call({request_id:base.request_id},'telegram_receipt');assert.equal(receipt.telegram_error_reason,result.telegram_error_reason);assert.equal(receipt.telegram_error_code,400);
+ assert.equal((await call()).telegram_error_reason,result.telegram_error_reason);assert.equal(seen.length,1);
+ assert.equal(env.DB.s.prepare('SELECT telegram_error_reason FROM deliveries').get().telegram_error_reason,'image_processing_failed');
+ assert.equal((await call({request_id:base.request_id},'telegram_receipt','bob')).status,'not_found');
+});
+test('unknown description never stored or returned; legacy rejected receipts still readable',async()=>{
+ const {call,env}=setup(()=>Response.json({ok:false,error_code:400,description:'SECRET filename or URL'},{status:400}));
+ assert.equal((await call()).telegram_error_reason,'telegram_rejected');
+ const row=env.DB.s.prepare('SELECT * FROM deliveries').get();assert.ok(!JSON.stringify(row).includes('SECRET'));
+ env.DB.s.exec('UPDATE deliveries SET telegram_error_code=NULL,telegram_error_reason=NULL');
+ const r=await call({request_id:base.request_id},'telegram_receipt');assert.equal(r.status,'rejected');assert.equal(r.telegram_error_reason,undefined);
+});
+test('missing migration fails before Telegram and before request claim',async()=>{
+ const {call,seen,env}=setup();const old=env.DB.prepare.bind(env.DB);
+ env.DB.prepare=sql=>{if(sql.startsWith('SELECT telegram_error_code'))throw Error('no such column');return old(sql);};
+ assert.match((await call()).error,/migration/);assert.equal(seen.length,0);assert.equal(env.DB.s.prepare('SELECT COUNT(*) n FROM deliveries').get().n,0);
 });
