@@ -20,6 +20,8 @@ async function edit(token){
  return JSON.parse((await response.json()).result.content[0].text);
 }
 export default {async fetch(){return Response.json({
+ attachmentBoundary:await invoke('telegram_send_attachment',{destination:'test',request_id:'runtime-boundary',filename:'boundary.bin',mime_type:'application/octet-stream',data_base64:btoa('A'.repeat(8*1024*1024))},'BOUNDARY'),
+ attachment:await invoke('telegram_send_attachment',{destination:'test',request_id:'runtime-attachment',filename:'example.txt',mime_type:'text/plain',data_base64:btoa('Hello attachment'),caption:'<b>File</b>',parse_mode:'HTML'},'ATTACHMENT'),
  edit:await edit('EDIT'),
  redirectEdit:await edit('REDIRECT'),
  send:await invoke('telegram_send',{destination:'test',text:'Offline fake message',request_id:'runtime-send'},'FAKE'),
