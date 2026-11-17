@@ -36,6 +36,7 @@ services = [
   try{response=await fetch(`http://127.0.0.1:${port}`,{signal:AbortSignal.timeout(5000)});break;}catch{await new Promise(r=>setTimeout(r,50));}
  }
  assert.ok(response,`workerd did not start: ${logs}`);const result=await response.json();
+ assert.equal(result.attachmentBoundary.status,'sent');assert.equal(result.attachmentBoundary.message_id,45);
  assert.equal(result.attachment.status,'sent');assert.equal(result.attachment.message_id,44);
  assert.equal(result.send.status,'sent');assert.equal(result.send.message_id,42);
  assert.equal(result.edit.status,'sent');assert.equal(result.edit.message_id,42);

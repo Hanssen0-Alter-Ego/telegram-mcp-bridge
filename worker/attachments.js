@@ -17,7 +17,7 @@ export async function sendAttachment(a,user,env,c,fetcher,output){
  const b64=a.data_base64;
  if(typeof b64!=='string'||!b64.length||b64.length>MAX_ATTACHMENT_BASE64||b64.length%4||/[^A-Za-z0-9+/=]/.test(b64)||b64.slice(0,-2).includes('=')||b64.endsWith('=')&&b64.at(-2)==='='&&b64.length<4||b64.at(-2)==='='&&!b64.endsWith('='))fail();
  const binary=atob(b64);if(!binary.length||binary.length>MAX_ATTACHMENT_BYTES||btoa(binary)!==b64)fail();
- const bytes=Uint8Array.from(binary,ch=>ch.charCodeAt(0));
+ const bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
  const prefix=(...values)=>values.every((v,i)=>bytes[i]===v);
  const mp4=binary.slice(4,8)==='ftyp';
  // Signature checks select native previews; they are not a malware scan or a full codec parser.

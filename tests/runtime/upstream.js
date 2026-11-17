@@ -12,6 +12,10 @@ export default {async fetch(request){
   const body=await request.json();const valid=body.chat_id==='123'&&body.message_id===42&&body.text==='<b>更新</b>'&&body.parse_mode==='HTML'&&!Object.hasOwn(body,'message_thread_id')&&body.link_preview_options?.is_disabled===true;
   return Response.json(valid?{ok:true,result:{message_id:42,chat:{id:123}}}:{ok:false,error_code:400},{status:valid?200:400});
  }
+ if(url.pathname==='/botBOUNDARY/sendDocument'){
+  const form=await request.formData();const file=form.get('document');const valid=file?.size===8*1024*1024;
+  return Response.json(valid?{ok:true,result:{message_id:45,chat:{id:123}}}:{ok:false,error_code:400},{status:valid?200:400});
+ }
  if(url.pathname==='/botATTACHMENT/sendDocument'){
   const form=await request.formData();const file=form.get('document');const valid=form.get('chat_id')==='123'&&form.get('caption')==='<b>File</b>'&&form.get('parse_mode')==='HTML'&&file?.name==='example.txt'&&await file.text()==='Hello attachment';
   return Response.json(valid?{ok:true,result:{message_id:44,chat:{id:123}}}:{ok:false,error_code:400},{status:valid?200:400});
