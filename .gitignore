@@ -2,3 +2,6 @@
 .env*
 node_modules/
 .wrangler/
+artifacts/
+telegram-mcp-plugin/
+*.tar.gz
