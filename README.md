@@ -258,3 +258,27 @@ Updating the packaged skill alone does not deploy this server change. Only send
 an end-to-end test to a destination the owner has explicitly approved.
 
 Telegram reference: <https://core.telegram.org/bots/api#sending-files>.
+
+## Safe error diagnostics (server 0.4.1)
+
+Rejected text, edits and attachments now include a numeric `telegram_error_code`
+and fixed `telegram_error_reason`, also available through `telegram_receipt` and
+identical-request retries. Known categories distinguish image processing or
+size/dimensions, chat/topic configuration, bot access, caption formatting and
+rate limiting. Unrecognized descriptions become `telegram_rejected`. Raw
+Telegram descriptions, parameters, filenames, URLs and recipient IDs are never
+stored or echoed. Categories are diagnostic hints, not automatic retry permission.
+Historical receipts cannot recover descriptions that were already discarded.
+
+**Before deploying 0.4.1**, apply the additive migration using the existing D1
+binding/database, then deploy normally:
+
+```sh
+npx wrangler@4 d1 migrations apply telegram-mcp --remote
+npx wrangler@4 deploy
+```
+
+If your existing configured database has another name, use that existing name,
+not a new database. No new secrets or connection are needed. Missing migration
+blocks sends before any Telegram request or claim. Preserve existing config and
+credentials. This change does not resend failed requests or send test messages.
