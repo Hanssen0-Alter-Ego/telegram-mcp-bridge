@@ -13,6 +13,7 @@ try {
  // Preserve the source's relative import without changing its implementation.
  const {mkdir}=await import('node:fs/promises');await mkdir(join(directory,'config'));await mkdir(join(directory,'worker'));
  await copyFile(join(directory,'index.js'),join(directory,'worker/index.js'));
+ await copyFile(new URL('../worker/attachments.js',import.meta.url),join(directory,'worker/attachments.js'));
  await copyFile(join(directory,'destinations.js'),join(directory,'config/destinations.js'));
  await copyFile(join(directory,'handler.js'),join(directory,'worker/handler.js'));
  const socket=createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));
@@ -22,6 +23,7 @@ services = [
 (name="main",worker=(compatibilityDate="2026-10-26",globalOutbound="mock",modules=[
 (name="worker/handler.js",esModule=embed "worker/handler.js"),
 (name="worker/index.js",esModule=embed "worker/index.js"),
+(name="worker/attachments.js",esModule=embed "worker/attachments.js"),
 (name="config/destinations.js",esModule=embed "config/destinations.js")
 ])),
 (name="mock",worker=(compatibilityDate="2026-10-26",modules=[(name="upstream.js",esModule=embed "upstream.js")]))
@@ -34,6 +36,7 @@ services = [
   try{response=await fetch(`http://127.0.0.1:${port}`,{signal:AbortSignal.timeout(5000)});break;}catch{await new Promise(r=>setTimeout(r,50));}
  }
  assert.ok(response,`workerd did not start: ${logs}`);const result=await response.json();
+ assert.equal(result.attachment.status,'sent');assert.equal(result.attachment.message_id,44);
  assert.equal(result.send.status,'sent');assert.equal(result.send.message_id,42);
  assert.equal(result.edit.status,'sent');assert.equal(result.edit.message_id,42);
  assert.equal(result.redirectEdit.status,'unknown');assert.equal(result.redirectEdit.do_not_retry,true);
@@ -42,7 +45,7 @@ services = [
  assert.equal(result.read.sync.status,'synced');assert.deepEqual(result.read.messages,[]);
  assert.equal(result.redirectSend.status,'unknown');assert.equal(result.redirectSend.do_not_retry,true);
  assert.equal(result.redirectRead.sync.status,'retrieval_failed');
- console.log('PASS: real workerd plain/HTML/MarkdownV2 sends, edit, read, and refused redirects (offline mock upstream).');
+ console.log('PASS: real workerd multipart attachment, plain/HTML/MarkdownV2 sends, edit, read, and refused redirects (offline mock upstream).');
 } finally {
  if(child?.pid&&child.exitCode===null){const stopped=new Promise(r=>child.once('exit',r));child.kill();await stopped;}
  await rm(directory,{recursive:true,force:true});

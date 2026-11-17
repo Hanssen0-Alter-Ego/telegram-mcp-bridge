@@ -32,3 +32,17 @@ Check telegram_receipt for editing outcomes too. Pending/unknown edits block new
 edits on that message; do not work around this with a new ID. Never automatically
 post a replacement message when editing fails. Confirm the live tool and migration
 are available before promising an edit succeeded.
+
+## Attachments
+
+Only when live status advertises attachments_supported and the tool is exposed,
+use telegram_send_attachment for explicitly authorized files and recipients.
+Provide actual canonical base64 bytes, a safe filename, MIME type, and request ID;
+never substitute a local path, Library ID or download URL. Read/inspect the file
+and metadata first; do not share secrets or unrelated private content. The server
+caps decoded files at 8 MiB; host limits may be lower. Do not paste base64 in user
+chat. auto previews PNG/JPEG, MP4 video and MP3/M4A audio, with other types sent as
+documents; document preserves original bytes. Caption supports advertised HTML
+or MarkdownV2, up to 1024 source units. One file per request; no albums or media
+editing. Pending/unknown: inspect receipt and never retry with a new ID. Do not
+claim deployment or delivery from a skill update or local mock test.

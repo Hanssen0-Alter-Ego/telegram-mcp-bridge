@@ -222,3 +222,39 @@ edit eligibility and permissions still apply. See the
 6. Only after authorization, test a harmless send and edit in a private destination,
    checking receipts and the visible Telegram result. Offline tests do not prove
    production Telegram rendering, bot permissions, or your deployment succeeded.
+
+## Attachments (server 0.4)
+
+`telegram_send_attachment` sends actual bytes as multipart to Telegram, with the
+same destination allowlist, caller permissions, topics, request IDs and receipts
+as text. Inputs: `destination`, `request_id`, `filename`, `mime_type`, canonical
+`data_base64`; optional `kind`, `caption`, `parse_mode`.
+
+- `kind: auto` (default): signature-checked JPEG/PNG → photo; MP4 → video;
+  MP3/M4A → audio player. Other formats (including text, PDF, GIF, OGG, ZIP)
+  are documents. Explicit `document` preserves the original image/file.
+- The bridge limit is **8 MiB decoded**, below Telegram's limits, to bound MCP
+  JSON/base64 and Worker memory. Host/tool input limits may be lower. Large
+  files, chunking, URL fetching, file IDs, albums and caption editing are not
+  supported in this version. Never paste large base64 into a user conversation.
+- Optional caption is at most 1024 UTF-16 source units, conservatively including
+  formatting markup; HTML and MarkdownV2 work as with text. No fallback send is
+  attempted on Telegram rejection. Media codec/dimension validation remains
+  Telegram's responsibility; signature checks are not an antivirus scan.
+- The server accepts no URLs or local paths and stores no media bytes or
+  captions in D1. Multipart goes only to Telegram, without redirects. Receipts
+  store a hash of bytes + filename/type + caption/format + exact chat/topic.
+  Inspect file content and EXIF/other metadata before authorized sharing.
+- Retry only identical content with the same request ID. Pending/unknown means
+  **check receipt, do not resend with a new ID**. Receipt-save failures retain
+  the claim. Changing a destination's chat/topic cannot redirect an old request.
+
+Deploy: preserve your existing `config/`, Worker secrets, database binding and
+private App connection, review this branch, run `npm test` and `npm run
+test:workerd`, then deploy with your normal Wrangler workflow. No new migration
+or secret is required. Refresh/reconnect tools if needed; verify
+`telegram_status.attachments_supported` and the new tool schema before use.
+Updating the packaged skill alone does not deploy this server change. Only send
+an end-to-end test to a destination the owner has explicitly approved.
+
+Telegram reference: <https://core.telegram.org/bots/api#sending-files>.
