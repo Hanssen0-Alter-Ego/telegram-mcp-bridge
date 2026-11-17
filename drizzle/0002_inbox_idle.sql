@@ -1,0 +1,1 @@
+ALTER TABLE inbox_cursor ADD COLUMN last_received_at INTEGER NOT NULL DEFAULT 0;

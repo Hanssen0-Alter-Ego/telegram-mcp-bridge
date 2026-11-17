@@ -1,0 +1,11 @@
+# Security boundaries and verification
+
+This is an experimental, small-scale Telegram MCP bridge, not a production security audit or a guarantee of isolation from traffic analysis. Deploy only worker/standalone.js on your own Worker. Bot credentials stay in Worker secrets; API client credentials are distinct per client. A caller is authenticated by possession of their bearer key, not by Telegram membership or an asserted header.
+
+Cloudflare terminates HTTPS and runs the code, stores secrets and D1 messages, and can access that data under its service controls. A compromised Cloudflare account or malicious deployment can read secrets. Use restricted account permissions, strong account authentication, separate bot/project, no token/body logging, and limit group membership. TLS does not hide data from the hosting provider. Default code accepts only configured chat/topic aliases but a Telegram poll transiently receives the bot-wide queue.
+
+Known limits: no client rate limiter or spending cap in the application, indefinite inbox retention, fixed 60-second poll lease, no live Telegram test, no live self-hosted Cloudflare test, and Dot connection authentication not end-to-end verified. Enable only after reviewing these limits. Do not expose a high-value bot or share widely without additional controls.
+
+Focused source checks found and corrected: cross-chat global sequence/update-ID metadata exposure (replaced by chat-local ordinal cursors), and request-body limit after full buffering (replaced by streaming byte cap). An independent focused recheck reran 22 local mocked/SQLite tests successfully. These tests cover these and the main auth, pagination and send-receipt paths. They do not prove all edge cases safe. Telegram message IDs may still reveal gaps within a chat/topic; no claim of perfect traffic-metadata isolation is made. Chat-local row-number pagination assumes earlier rows are not deleted, so retention work must redesign/preserve cursor stability.
+
+Do not publish vulnerabilities containing live tokens or private messages. Rotate compromised bot/client credentials through their issuing services; deleting a Git commit alone is not revocation. Unknown/pending sends need manual reconciliation, never blind retries.
