@@ -11,9 +11,21 @@ export function createStandalone(c=config, principals=clients, fetcher=fetch){
  const core=createWorker(c,fetcher);
  return {async fetch(request,env){
   const deny=()=>new Response(JSON.stringify({error:'Unauthorized'}),{status:401,headers:{'content-type':'application/json','cache-control':'no-store','www-authenticate':'Bearer realm="telegram-mcp"'}});
+  const url=new URL(request.url);
+  if(url.search||url.hash)return deny();
   const auth=request.headers.get('authorization');
-  if(!auth||!/^Bearer [A-Za-z0-9_-]{43,128}$/.test(auth))return deny();
-  const supplied=auth.slice(7);
+  const pathKey=url.pathname.startsWith('/mcp/')?url.pathname.slice(5):null;
+  let supplied;
+  if(pathKey!==null){
+   // Private capability URL, like Token Vault. No redirects or URL logging.
+   // Require an exact deployment origin; never accept two competing credentials.
+   if(!/^[A-Za-z0-9_-]{43,128}$/.test(pathKey)||auth||url.origin!==env.PUBLIC_ORIGIN||url.protocol!=='https:')return deny();
+   if(request.headers.has('origin'))return deny();
+   supplied=pathKey;
+  }else{
+   if(!auth||!/^Bearer [A-Za-z0-9_-]{43,128}$/.test(auth))return deny();
+   supplied=auth.slice(7);
+  }
   // Fixed-size digests keep equality independent of the secret length/content.
   const hash=async x=>new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(x)));
   const incoming=await hash(supplied);let matched=[];
@@ -29,7 +41,14 @@ export function createStandalone(c=config, principals=clients, fetcher=fetch){
   const headers=new Headers(request.headers);
   for(const key of [...headers.keys()])if(key.startsWith('oai-')||key==='authorization')headers.delete(key);
   headers.set('oai-authenticated-user-id',matched[0]);
-  return core.fetch(new Request(request,{headers}),env);
+  // The core sees no capability URL, even if future diagnostics inspect it.
+  url.pathname=pathKey!==null?'/mcp':url.pathname;
+  const clean=new Request(url.href,{method:request.method,headers,body:request.body,
+   ...(request.body?{duplex:'half'}:{})});
+  const response=await core.fetch(clean,env);
+  const safe=new Headers(response.headers);
+  safe.set('referrer-policy','no-referrer');safe.set('cache-control','no-store');
+  return new Response(response.body,{status:response.status,headers:safe});
  }};
 }
 export default createStandalone();

@@ -4,9 +4,9 @@ Explicit message reading and authorized sending; no wake/background polling, no 
 
 ## What is and is not ready
 
-This standalone entry point validates per-client bearer credentials before deriving the caller identity. Public `oai-authenticated-*` headers are ignored. NEVER deploy `worker/index.js` directly: its identity contract is Sites-only. Wrangler uses `worker/standalone.js`.
+This standalone entry point validates per-client credentials before deriving the caller identity. Public `oai-authenticated-*` headers are ignored. NEVER deploy `worker/index.js` directly: its identity contract is Sites-only. Wrangler uses `worker/standalone.js`.
 
-Tested locally with Node mock HTTP and SQLite. Not deployed/tested on your Cloudflare account or against a real Telegram bot. No OAuth authorization server is implemented. This supports HTTP MCP clients that securely supply Authorization: Bearer. The local Plugin Creator package schema accepts API-key/Bearer metadata (see below), matching this server. However, the public OpenAI authentication guide states ChatGPT cannot present custom API keys. These are conflicting package-vs-runtime signals: schema acceptance does NOT prove this Dot can connect. End-to-end connection remains untested. OAuth may be required for the target host; it is NOT implemented here. Never select unauthenticated access or put credentials in URL query/path.
+Tested locally with Node mock HTTP and SQLite. Not deployed/tested on your Cloudflare account or against a real Telegram bot. There is no OAuth server. Two transports authenticate against the same per-client key: Bearer on `/mcp`, and a fixed private capability URL `/mcp/<client-key>` for a private plugin, following Token Vault's packaging pattern. `auth: none` in the private plugin means the platform adds no credential; it does NOT disable server authentication. This does not depend on the Vault service being online. Native Dot end-to-end installation remains to be verified.
 
 ## Deploy yourself
 
@@ -50,32 +50,31 @@ Use the actual numeric chat ID, not a username; optional threadId targets exactl
 
 For multiple users, add a distinct principal/secret in config/clients.js, then list that principal only on approved destinations. This authenticates MCP clients, NOT people who send Telegram messages. Sharing the same key means sharing the same permissions. No Telegram group member gains authority over the assistant by sending a message.
 
-## Candidate plugin metadata, NOT a verified Dot connection
+## Private plugin installation (Token Vault pattern)
 
-The documented portable plugin schema supports:
-
-```json
-"extensions": {
-  "com.openai": {
-    "auth": {"type": "api_key", "headerScheme": "bearer"}
-  }
-}
-```
-
-This belongs under the individual remote server in `mcp.json`, not at the top level. No key belongs in the package.
-
-After obtaining your actual deployed URL, generate a credential-free package:
+The Telegram Bot Token stays ONLY in the Worker secret `TELEGRAM_BOT_TOKEN`. The independent MCP key is a credential granting the configured client's permissions. Set the deployed Worker's `PUBLIC_ORIGIN` to its exact public HTTPS origin (no path/trailing slash):
 
 ```sh
-node scripts/make-plugin.mjs https://YOUR-ACTUAL-WORKER-HOST/mcp
-tar -czf telegram-mcp-plugin.tar.gz telegram-mcp-plugin
+npx wrangler@4 secret put PUBLIC_ORIGIN
 ```
 
-Give the assistant the actual non-secret endpoint and package, not your keys. It can verify the endpoint and create the private plugin through the supported plugin workflow. Only if the platform actually offers supported API-key credential entry, enter the MCP client key (same value as MCP_CLIENT_OWNER), never your Telegram bot token. The exact connection UI and end-to-end Dot invocation remain untested until a real endpoint exists. Public OpenAI docs: https://developers.openai.com/plugins/build/auth (Client identification) currently state custom API keys cannot be presented by ChatGPT; treat this candidate manifest as unverified, not a ready-to-install solution. If the platform offers no supported credential-entry control, stop rather than paste the key into conversation or put it into manifest/URL. Plugin creation alone does not prove successful authentication.
+Locally create `.env.plugin`, mode 0600, with `PUBLIC_ORIGIN` and `MCP_CLIENT_KEY`. The key must be the SAME value stored as that client's Worker secret (for the owner, `MCP_CLIENT_OWNER`). Use a separate key and private archive for each independently permissioned client. Do not put the Bot Token in this file. Do not type secrets in command arguments or chat.
+
+```sh
+npm run plugin:build
+```
+
+This reads `.env.plugin` and creates `artifacts/telegram-mcp-private.tar.gz`. It includes the client key in a fixed MCP URL, the tool-use skill, modern and legacy manifests, and installation notes. It does not include `.env.plugin`, server config, D1, Bot Token, or unrelated files. The archive is a credential, not a public distributable; keep it private and never commit it. The script does not print its URL/key.
+
+Install/update using the private Plugin Creator flow, without displaying connection configuration. If bundled remote MCP activation does not work, use Plugins > Add custom MCP server, paste the generated URL locally, select None (the server still validates the path key), and preserve that connection when adding the skill. A saved package is not proof of successful connection. Actually call `telegram_status` before enabling use; do not send real messages merely to test installation.
+
+Do not open the private URL in an ordinary browser, paste it in conversation, or include it in logs/screenshots. Disable full request-URL logging at Cloudflare and any reverse proxy; application code never logs it and strips it before core dispatch, but provider logging is outside this code's control. A leaked URL/archive grants all that client's configured permissions until its key is rotated. Replace the server key and regenerate/reinstall that client's package to rotate it. Telegram Bot Token is a different credential and remains server-side.
+
+For clients supporting secure Bearer header configuration, the existing credential-free `scripts/make-plugin.mjs https://HOST/mcp` remains available. No OAuth is required by the Worker; target-client activation is still an integration test, not guaranteed by the manifest.
 
 ## Verify without posting a message
 
-Use your HTTP MCP client's secure bearer-header setting and the deployed HTTPS URL ending /mcp. Call telegram_status; ensure only that credential's aliases are listed. Missing/wrong credentials must return HTTP 401, even with a forged oai-authenticated-user-id header. Check telegram_read only after you authorize the destination's contents to be read. Test send only to an explicitly authorized recipient with a stated harmless test message. Never blindly retry an unknown receipt.
+Use the installed private plugin, or your HTTP MCP client's secure bearer-header setting with the deployed HTTPS URL ending /mcp. Call telegram_status; ensure only that credential's aliases are listed. Missing/wrong credentials must return HTTP 401, even with a forged oai-authenticated-user-id header. Check telegram_read only after you authorize the destination's contents to be read. Test send only to an explicitly authorized recipient with a stated harmless test message. Never blindly retry an unknown receipt.
 
 ## Data and operational limits
 
@@ -96,4 +95,4 @@ Pagination cursors are local ordinals within each chat/topic, not bot-wide Teleg
 
 ## Open-source status
 
-Experimental release under MIT. See SECURITY.md for hosting trust and known operational gaps. The bearer-key manifest is a candidate connection configuration, not evidence of successful Dot integration. Do not publish credentials to Issues or PRs.
+Experimental release under MIT. See SECURITY.md for hosting trust and known operational gaps. Neither packaging mode is evidence of successful Dot integration. Do not publish credentials to Issues or PRs.
