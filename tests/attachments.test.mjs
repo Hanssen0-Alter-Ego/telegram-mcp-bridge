@@ -74,5 +74,8 @@ test('unknown description never stored or returned; legacy rejected receipts sti
 test('missing migration fails before Telegram and before request claim',async()=>{
  const {call,seen,env}=setup();const old=env.DB.prepare.bind(env.DB);
  env.DB.prepare=sql=>{if(sql.startsWith('SELECT telegram_error_code'))throw Error('no such column');return old(sql);};
+ const status=await call({},'telegram_status');assert.equal(status.diagnostics_schema_ready,false);assert.equal(status.safe_error_diagnostics,false);assert.equal(status.ready,false);
  assert.match((await call()).error,/migration/);assert.equal(seen.length,0);assert.equal(env.DB.s.prepare('SELECT COUNT(*) n FROM deliveries').get().n,0);
 });
+
+test('migrated status reports schema readiness',async()=>{const {call}=setup();const status=await call({},'telegram_status');assert.equal(status.diagnostics_schema_ready,true);assert.equal(status.safe_error_diagnostics,true);assert.equal(status.ready,true);});
