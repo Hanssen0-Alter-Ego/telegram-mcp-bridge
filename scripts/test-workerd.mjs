@@ -35,10 +35,14 @@ services = [
  }
  assert.ok(response,`workerd did not start: ${logs}`);const result=await response.json();
  assert.equal(result.send.status,'sent');assert.equal(result.send.message_id,42);
+ assert.equal(result.edit.status,'sent');assert.equal(result.edit.message_id,42);
+ assert.equal(result.redirectEdit.status,'unknown');assert.equal(result.redirectEdit.do_not_retry,true);
+ assert.equal(result.html.status,'sent');assert.equal(result.html.message_id,43);
+ assert.equal(result.markdown.status,'sent');assert.equal(result.markdown.message_id,43);
  assert.equal(result.read.sync.status,'synced');assert.deepEqual(result.read.messages,[]);
  assert.equal(result.redirectSend.status,'unknown');assert.equal(result.redirectSend.do_not_retry,true);
  assert.equal(result.redirectRead.sync.status,'retrieval_failed');
- console.log('PASS: real workerd send, read, send redirect, and read redirect (offline mock upstream).');
+ console.log('PASS: real workerd plain/HTML/MarkdownV2 sends, edit, read, and refused redirects (offline mock upstream).');
 } finally {
  if(child?.pid&&child.exitCode===null){const stopped=new Promise(r=>child.once('exit',r));child.kill();await stopped;}
  await rm(directory,{recursive:true,force:true});

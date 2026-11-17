@@ -96,3 +96,129 @@ Pagination cursors are local ordinals within each chat/topic, not bot-wide Teleg
 ## Open-source status
 
 Experimental release under MIT. See SECURITY.md for hosting trust and known operational gaps. Neither packaging mode is evidence of successful Dot integration. Do not publish credentials to Issues or PRs.
+
+## Formatted messages
+
+`telegram_send` accepts optional `parse_mode: "HTML"` or `"MarkdownV2"`.
+Omitting it preserves literal plain text, including existing callers and receipts.
+There is no automatic Markdown detection, conversion, or plain-text fallback.
+Use `telegram_status.supported_parse_modes` and the tool schema to verify the
+updated server is connected. `plain_text_only` is now false.
+
+For reports, prefer HTML. It supports clickable source labels without requiring
+MarkdownV2's punctuation escaping:
+
+```json
+{
+  "destination": "personal",
+  "request_id": "report-example-001",
+  "text": "<b>本周更新</b>\n<a href=\"https://github.com/example/repo/issues/1\">查看来源</a>",
+  "parse_mode": "HTML"
+}
+```
+
+Escape dynamic HTML text (`&`, `<`, `>`), and escape double quotes in quoted
+attributes as `&quot;`. Use supported Telegram tags, not arbitrary web HTML.
+For instance, a query string inside an HTML link uses `&amp;`, and line breaks
+use actual newlines, not `<br>`. Preserve source URLs accurately; do not conceal
+an unrelated destination behind a misleading label. No URL is fetched by this
+bridge to generate formatting. Link previews remain disabled.
+
+MarkdownV2 is Telegram's format, not CommonMark/GitHub Markdown. For example:
+
+```json
+{
+  "destination": "personal",
+  "request_id": "report-example-002",
+  "text": "*本周更新*\n[查看来源](https://github.com/example/repo/issues/1)",
+  "parse_mode": "MarkdownV2"
+}
+```
+
+Escape MarkdownV2 punctuation in ordinary text, including `_ * [ ] ( ) ~ \` > # + - = | { } . !`.
+Code spans/blocks and link URLs have different escaping rules. JSON itself also
+requires backslashes to be escaped. Prefer HTML when composing dynamic reports.
+The bridge forwards the selected format unchanged; Telegram validates syntax.
+It retains the conservative 4096 UTF-16-code-unit **input** limit, including markup,
+so some valid longer marked-up inputs are intentionally rejected. It never splits
+markup or posts extra messages automatically.
+
+Formatting is part of request identity. Reusing an ID with a different parse mode
+(or removing the mode) is rejected, even when the text is identical. Old plain-text
+receipt fingerprints are unchanged. Telegram format errors become a persisted
+`rejected` receipt (usually error code 400), without exposing its response body or
+resending as plain text. Correct an explicitly rejected message with a new ID;
+never do this for `pending` or `unknown` deliveries.
+
+Reference: [Telegram formatting options](https://core.telegram.org/bots/api#formatting-options).
+
+## Editing bridge-sent messages
+
+`telegram_edit` changes text/formatting on a verified message previously sent by
+this bridge. It does not edit arbitrary chat history, other people's messages,
+attachments or captions, and it cannot move a message to another chat/topic.
+Use the original send's `original_request_id`, the authorized `destination`, a
+**new** edit `request_id`, and the replacement `text`/optional `parse_mode`.
+Sending authorization alone does not authorize later material changes; get the
+owner's authorization for the edit's recipient, purpose and content.
+
+On the first edit of a message, also supply `original_text` and, if used on the
+original send, `original_parse_mode`. These must match the initial send body
+exactly, not the rendered Telegram text or a later edited version. The bridge
+checks them against the caller's original successful receipt fingerprint, then
+caches the verified chat/topic/message mapping. This supports messages sent before
+this release without trusting caller-supplied Telegram message IDs. Subsequent
+edits can omit the original proof after that mapping exists.
+
+```json
+{
+  "destination": "personal",
+  "original_request_id": "report-example-001",
+  "original_text": "<b>本周更新</b>\n<a href=\"https://github.com/example/repo/issues/1\">查看来源</a>",
+  "original_parse_mode": "HTML",
+  "request_id": "report-example-edit-001",
+  "text": "<b>本周更新（已补充）</b>\n<a href=\"https://github.com/example/repo/issues/1\">查看来源</a>",
+  "parse_mode": "HTML"
+}
+```
+
+Only a `sent` original receipt belonging to the authenticated caller is eligible.
+The configured destination must still allow that caller to send and must match
+the verified original chat/topic. Unknown, rejected, missing, or another caller's
+receipts cannot establish ownership. If the original request ID/body is lost and
+no verified mapping exists, there is no unsafe raw-ID override.
+
+Edits use the same receipt tool and request-ID namespace as sends. Keep edit IDs
+unique; retrying the same ID never repeats the Telegram request. The original
+send receipt stays intact. At most one edit per message may be in flight. An
+ambiguous edit keeps the message locked against further edits, including those
+with new IDs: inspect the receipt and verify Telegram delivery manually rather
+than guessing or racing a delayed request. A definite Telegram rejection does not
+trigger a new message or format fallback. Telegram may reject a no-op edit with
+error 400 (message not modified); this remains a rejected receipt, not a new send.
+There is no blanket 48-hour restriction imposed by this bridge; actual Telegram
+edit eligibility and permissions still apply. See the
+[editMessageText API](https://core.telegram.org/bots/api#editmessagetext).
+
+## Upgrade for formatting and editing
+
+1. Back up/review your deployment configuration. Update the code, preserving your
+   own `config/destinations.js`, `config/clients.js`, Worker name, D1 binding and
+   public origin. Do not replace these with this repository's disabled examples.
+2. Run `npm test`; optionally run `npm run test:workerd` with official workerd
+   available. The runtime suite is offline and uses fake destinations/tokens.
+3. Apply the new D1 migration to your existing database **before deploying**:
+   `npx wrangler@4 d1 migrations apply telegram-mcp --remote` (substitute your
+   configured database name). It adds edit verification/locking state; existing
+   send receipts are retained. Do not recreate the database or rotate working
+   credentials merely for this upgrade.
+4. Run `npx wrangler@4 deploy` using your reviewed Worker configuration. Deployment
+   alone neither sends nor edits messages.
+5. Refresh/reconnect the existing custom MCP server if its client caches tools.
+   Verify `telegram_status` lists HTML/MarkdownV2 and `tools/list` includes
+   `telegram_edit`. If using the packaged plugin skill, rebuild/reinstall your
+   private package locally to get updated guidance. Keep its credential-bearing
+   archive private. No new server URL or bot token is needed for this feature.
+6. Only after authorization, test a harmless send and edit in a private destination,
+   checking receipts and the visible Telegram result. Offline tests do not prove
+   production Telegram rendering, bot permissions, or your deployment succeeded.
