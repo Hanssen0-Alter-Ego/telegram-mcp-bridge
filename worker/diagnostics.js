@@ -1,5 +1,7 @@
 // Never expose or persist Telegram's raw description, parameters, or request data.
 const reasons=new Map([
+ ['bad request: message to be replied not found','reply_target_not_found'],
+ ['bad request: reply message not found','reply_target_not_found'],
  ['bad request: image_process_failed','image_processing_failed'],
  ['bad request: photo_invalid_dimensions','invalid_photo_dimensions'],
  ['bad request: photo_invalid','invalid_photo'],

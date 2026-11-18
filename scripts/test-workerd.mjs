@@ -14,6 +14,8 @@ try {
  const {mkdir}=await import('node:fs/promises');await mkdir(join(directory,'config'));await mkdir(join(directory,'worker'));
  await copyFile(join(directory,'index.js'),join(directory,'worker/index.js'));
  await copyFile(new URL('../worker/attachments.js',import.meta.url),join(directory,'worker/attachments.js'));
+ for(const file of ['media-edits.js','edit-operation.js'])await copyFile(new URL('../worker/'+file,import.meta.url),join(directory,'worker/'+file));
+ await copyFile(new URL('../worker/replies.js',import.meta.url),join(directory,'worker/replies.js'));
  await copyFile(new URL('../worker/diagnostics.js',import.meta.url),join(directory,'worker/diagnostics.js'));
  await copyFile(join(directory,'destinations.js'),join(directory,'config/destinations.js'));
  await copyFile(join(directory,'handler.js'),join(directory,'worker/handler.js'));
@@ -25,6 +27,9 @@ services = [
 (name="worker/handler.js",esModule=embed "worker/handler.js"),
 (name="worker/index.js",esModule=embed "worker/index.js"),
 (name="worker/attachments.js",esModule=embed "worker/attachments.js"),
+(name="worker/media-edits.js",esModule=embed "worker/media-edits.js"),
+(name="worker/edit-operation.js",esModule=embed "worker/edit-operation.js"),
+(name="worker/replies.js",esModule=embed "worker/replies.js"),
 (name="worker/diagnostics.js",esModule=embed "worker/diagnostics.js"),
 (name="config/destinations.js",esModule=embed "config/destinations.js")
 ])),
@@ -38,6 +43,10 @@ services = [
   try{response=await fetch(`http://127.0.0.1:${port}`,{signal:AbortSignal.timeout(5000)});break;}catch{await new Promise(r=>setTimeout(r,50));}
  }
  assert.ok(response,`workerd did not start: ${logs}`);const result=await response.json();
+ assert.equal(result.replies.media.status,'sent');assert.equal(result.replies.caption.status,'sent');assert.equal(result.replies.original.reply_to.message_id,55);
+ assert.equal(result.replies.text.status,'sent');assert.equal(result.replies.duplicate.duplicate,true);
+ assert.equal(result.replies.receipt.reply_to.message_id,55);assert.equal(result.replies.attachment.status,'sent');
+ assert.equal(result.replies.rejected.status,'rejected');assert.equal(result.replies.rejected.telegram_error_reason,'reply_target_not_found');
  assert.equal(result.attachmentBoundary.status,'sent');assert.equal(result.attachmentBoundary.message_id,45);
  assert.equal(result.attachment.status,'sent');assert.equal(result.attachment.message_id,44);
  assert.equal(result.send.status,'sent');assert.equal(result.send.message_id,42);
@@ -48,7 +57,7 @@ services = [
  assert.equal(result.read.sync.status,'synced');assert.deepEqual(result.read.messages,[]);
  assert.equal(result.redirectSend.status,'unknown');assert.equal(result.redirectSend.do_not_retry,true);
  assert.equal(result.redirectRead.sync.status,'retrieval_failed');
- console.log('PASS: real workerd multipart attachment, plain/HTML/MarkdownV2 sends, edit, read, and refused redirects (offline mock upstream).');
+ console.log('PASS: real workerd media replacement/caption edits, text/multipart replies and missing-target rejection, multipart attachment, plain/HTML/MarkdownV2 sends, edit, read, and refused redirects (offline mock upstream).');
 } finally {
  if(child?.pid&&child.exitCode===null){const stopped=new Promise(r=>child.once('exit',r));child.kill();await stopped;}
  await rm(directory,{recursive:true,force:true});

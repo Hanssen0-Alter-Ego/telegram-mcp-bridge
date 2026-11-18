@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import {createWorker} from '../worker/index.js';
 import {MAX_ATTACHMENT_BYTES} from '../worker/attachments.js';
 class DB {
- constructor(){this.s=new DatabaseSync(':memory:');this.s.exec(readFileSync(new URL('../drizzle/0000_delivery_receipts.sql',import.meta.url),'utf8'));this.s.exec(readFileSync(new URL('../drizzle/0005_delivery_diagnostics.sql',import.meta.url),'utf8'));}
+ constructor(){this.s=new DatabaseSync(':memory:');this.s.exec(readFileSync(new URL('../drizzle/0000_delivery_receipts.sql',import.meta.url),'utf8'));this.s.exec(readFileSync(new URL('../drizzle/0005_delivery_diagnostics.sql',import.meta.url),'utf8'));this.s.exec(readFileSync(new URL('../drizzle/0006_message_replies.sql',import.meta.url),'utf8'));for(const f of ['0004_message_edits','0007_media_edits'])this.s.exec(readFileSync(new URL('../drizzle/'+f+'.sql',import.meta.url),'utf8'));}
  prepare(sql){const make=args=>({bind:(...a)=>make(a),first:async()=>this.s.prepare(sql).get(...args),run:async()=>({meta:{changes:Number(this.s.prepare(sql).run(...args).changes)}})});return make([]);}
 }
 const destination={chatId:'-10099',threadId:12,description:'Test',purpose:'Offline tests',canRead:true,canSend:true,allowedCallerIds:['alice']};

@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {createWorker} from '../worker/index.js';
 class DB {
- constructor(){this.s=new DatabaseSync(':memory:');for(const p of ['0000_delivery_receipts','0004_message_edits','0005_delivery_diagnostics'])this.s.exec(readFileSync(new URL(`../drizzle/${p}.sql`,import.meta.url),'utf8'));}
+ constructor(){this.s=new DatabaseSync(':memory:');for(const p of ['0000_delivery_receipts','0004_message_edits','0005_delivery_diagnostics','0006_message_replies','0007_media_edits'])this.s.exec(readFileSync(new URL(`../drizzle/${p}.sql`,import.meta.url),'utf8'));}
  prepare(sql){const make=args=>({bind:(...a)=>make(a),first:async()=>this.s.prepare(sql).get(...args),run:async()=>({meta:{changes:Number(this.s.prepare(sql).run(...args).changes)}})});return make([]);}
  async batch(items){this.s.exec('BEGIN');try{const r=[];for(const i of items)r.push(await i.run());this.s.exec('COMMIT');return r;}catch(e){this.s.exec('ROLLBACK');throw e;}}
 }
@@ -18,7 +18,7 @@ async function call(w,env,args,name='telegram_edit',user='alice'){
 }
 async function setup(editFetch=async()=>Response.json({ok:true,result:{message_id:7,chat:{id:-10099}}}),original=send){
  const db=new DB(),env={DB:db,TELEGRAM_BOT_TOKEN:'SECRET'},seen=[];
- const w=createWorker(config,async(url,opts)=>{if(url.endsWith('/sendMessage'))return Response.json({ok:true,result:{message_id:7}});seen.push([url,opts]);return editFetch(url,opts);});
+ const w=createWorker(config,async(url,opts)=>{if(url.endsWith('/sendMessage'))return Response.json({ok:true,result:{message_id:7,chat:{id:-10099},message_thread_id:12}});seen.push([url,opts]);return editFetch(url,opts);});
  assert.equal((await call(w,env,original,'telegram_send')).status,'sent');return {w,env,db,seen};
 }
 test('old send proof enables edit, then later edits omit proof and default to plain',async()=>{
