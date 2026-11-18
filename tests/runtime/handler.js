@@ -5,9 +5,9 @@ class DB {
  targets=new Map();
  prepare(sql){return {bind:(...args)=>this.statement(sql,args),...this.statement(sql,[])};}
  statement(sql,args){return {
-  first:async()=>sql.includes('edit_targets')?this.targets.get(args[0]+':'+args[1]):sql.includes('inbox_cursor')?{next_offset:0,last_received_at:Date.now(),epoch:0}:this.rows.get(args[0]+':'+args[1]),
+  first:async()=>sql.includes('FROM inbox_v2')?{message_id:55}:sql.includes('edit_targets')?this.targets.get(args[0]+':'+args[1]):sql.includes('inbox_cursor')?{next_offset:0,last_received_at:Date.now(),epoch:0}:this.rows.get(args[0]+':'+args[1]),
   all:async()=>({results:[]}),
-  run:async()=>{if(sql.startsWith('UPDATE edit_targets SET active_edit_id=?')){const [id,owner,original]=args;const target=this.targets.get(owner+':'+original);if(target.active_edit_id!==null)return {meta:{changes:0}};target.active_edit_id=id;}else if(sql.startsWith('UPDATE edit_targets SET active_edit_id=NULL')){const [owner,original,id]=args;const target=this.targets.get(owner+':'+original);if(target.active_edit_id===id)target.active_edit_id=null;}else if(sql.startsWith('INSERT OR IGNORE INTO deliveries')){const [owner,id,fingerprint,created_at,updated_at]=args;const key=owner+':'+id;if(this.rows.has(key))return {meta:{changes:0}};this.rows.set(key,{owner,id,fingerprint,status:'pending',created_at,updated_at});}else if(sql.startsWith('UPDATE deliveries')){const [status,message_id,updated_at,owner,id]=args;Object.assign(this.rows.get(owner+':'+id),{status,message_id,updated_at});}return {meta:{changes:1}};}
+  run:async()=>{if(sql.startsWith('INSERT OR IGNORE INTO edit_targets')){const [owner,id,chat_id,topic_id,message_id,current_kind='text']=args;const key=owner+':'+id;if(!this.targets.has(key))this.targets.set(key,{chat_id,topic_id,message_id,current_kind,active_edit_id:null});}else if(sql.startsWith('UPDATE edit_targets SET current_kind=')){const [kind,owner,id]=args;this.targets.get(owner+':'+id).current_kind=kind;}else if(sql.startsWith('UPDATE edit_targets SET active_edit_id=?')){const [id,owner,original]=args;const target=this.targets.get(owner+':'+original);if(target.active_edit_id!==null)return {meta:{changes:0}};target.active_edit_id=id;}else if(sql.startsWith('UPDATE edit_targets SET active_edit_id=NULL')){const [owner,original,id]=args;const target=this.targets.get(owner+':'+original);if(target.active_edit_id===id)target.active_edit_id=null;}else if(sql.startsWith('INSERT OR IGNORE INTO deliveries')){const [owner,id,fingerprint,created_at,updated_at,send_chat_id,send_topic_id,send_kind,reply_to_json]=args;const key=owner+':'+id;if(this.rows.has(key))return {meta:{changes:0}};this.rows.set(key,{owner,id,fingerprint,status:'pending',created_at,updated_at,send_chat_id,send_topic_id,send_kind,reply_to_json});}else if(sql.startsWith('UPDATE deliveries')){const [status,message_id,updated_at,owner,id]=args;Object.assign(this.rows.get(owner+':'+id),{status,message_id,updated_at});}return {meta:{changes:1}};}
  };}
  async batch(statements){return Promise.all(statements.map(x=>x.run()));}
 }
@@ -19,7 +19,22 @@ async function edit(token){
  const response=await createWorker(config).fetch(request('telegram_edit',{destination:'test',original_request_id:'runtime-original',request_id:'runtime-edit',text:'<b>更新</b>',parse_mode:'HTML'}),{DB:db,TELEGRAM_BOT_TOKEN:token});
  return JSON.parse((await response.json()).result.content[0].text);
 }
+async function replies(){
+ const db=new DB(),env={DB:db,TELEGRAM_BOT_TOKEN:'REPLY'},w=createWorker(config);
+ const call=async(name,args)=>JSON.parse((await (await w.fetch(request(name,args),env)).json()).result.content[0].text);
+ db.rows.set('owner:original-reply',{id:'original-reply',status:'sent',message_id:55,send_chat_id:'123',send_topic_id:0,send_kind:'text'});
+ const a={destination:'test',text:'runtime reply',request_id:'reply-runtime',reply_to:{request_id:'original-reply'}};
+ const text=await call('telegram_send',a),duplicate=await call('telegram_send',a),receipt=await call('telegram_receipt',{request_id:a.request_id});
+ const attachment=await call('telegram_send_attachment',{destination:'test',request_id:'reply-attachment',filename:'reply.txt',mime_type:'text/plain',data_base64:btoa('reply file'),reply_to:{message_id:55}});
+ env.TELEGRAM_BOT_TOKEN='REPLY_MISSING';const rejected=await call('telegram_send',{...a,request_id:'reply-missing'});
+ env.TELEGRAM_BOT_TOKEN='MEDIA_EDIT';
+ const media=await call('telegram_edit_media',{destination:'test',request_id:'runtime-media-edit',original_request_id:a.request_id,filename:'updated.txt',mime_type:'text/plain',data_base64:btoa('updated file'),caption:'<b>Updated</b>',parse_mode:'HTML'});
+ const caption=await call('telegram_edit_caption',{destination:'test',request_id:'runtime-caption-edit',original_request_id:a.request_id,caption:''});
+ const original=await call('telegram_receipt',{request_id:a.request_id});
+ return {text,duplicate,receipt,attachment,rejected,media,caption,original};
+}
 export default {async fetch(){return Response.json({
+ replies:await replies(),
  attachmentBoundary:await invoke('telegram_send_attachment',{destination:'test',request_id:'runtime-boundary',filename:'boundary.bin',mime_type:'application/octet-stream',data_base64:btoa('A'.repeat(8*1024*1024))},'BOUNDARY'),
  attachment:await invoke('telegram_send_attachment',{destination:'test',request_id:'runtime-attachment',filename:'example.txt',mime_type:'text/plain',data_base64:btoa('Hello attachment'),caption:'<b>File</b>',parse_mode:'HTML'},'ATTACHMENT'),
  edit:await edit('EDIT'),
