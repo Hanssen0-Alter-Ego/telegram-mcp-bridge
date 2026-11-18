@@ -43,8 +43,8 @@ and metadata first; do not share secrets or unrelated private content. The serve
 caps decoded files at 8 MiB; host limits may be lower. Do not paste base64 in user
 chat. auto previews PNG/JPEG, MP4 video and MP3/M4A audio, with other types sent as
 documents; document preserves original bytes. Caption supports advertised HTML
-or MarkdownV2, up to 1024 source units. One file per request; no albums or media
-editing. Pending/unknown: inspect receipt and never retry with a new ID. Do not
+or MarkdownV2, up to 1024 source units. One file per request; no albums. Media and caption editing require their
+separate live capabilities and tools; see the media editing guidance below. Pending/unknown: inspect receipt and never retry with a new ID. Do not
 claim deployment or delivery from a skill update or local mock test.
 
 
