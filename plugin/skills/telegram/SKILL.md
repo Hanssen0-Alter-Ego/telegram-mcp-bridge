@@ -73,6 +73,38 @@ a verified mapping with the legacy attachment edit proof below. No raw-ID or
 cross-chat override exists. New text replies can be edited using the normal
 original-text proof workflow; media edits use the separate tools below.
 
+### Choose reply proof fields without guessing
+
+For a new scoped send receipt, use only `reply_to: { request_id: "..." }`.
+The bridge already stores `send_kind`, chat and topic for these receipts and
+explicitly rejects `original_text` or `original_parse_mode` on them. Do not
+copy an old-receipt proof into every reply "for safety".
+
+The current `telegram_receipt` response does not expose `send_kind` or the
+stored chat/topic. Its omission is not evidence that a receipt is legacy.
+For an already-authorized message with a verified successful target in the
+same destination, prefer the bare request-ID reference. Supply exact original
+text/format only when the target is confirmed legacy and lacks a verified
+edit mapping. Do not infer legacy status merely from the message's age or
+the absence of fields in the receipt response.
+
+`Reply target unavailable or destination does not match` is a local validation
+error shared by several causes, including unnecessary legacy proof fields.
+It is not proof that Telegram deleted the message. Inspect the actual arguments,
+saved target record and receipt before attributing a cause. A local rejection
+before a delivery claim plus a `not_found` receipt can establish that this
+attempt did not send; `not_found` alone after a timeout cannot establish that.
+Only correct and retry a known pre-send validation failure when the same target,
+content and destination remain authorized. Pending/unknown outcomes still
+require reconciliation; never switch request IDs or remove the reply to hide
+uncertainty.
+
+Do not send test messages to diagnose replies without explicit authorization.
+After a rejected reply, do not silently send an independent replacement.
+If the owner explicitly approves a standalone notification after confirmed
+non-delivery, track it as a distinct authorized payload, check both request IDs,
+and record the original failure and replacement receipt together.
+
 Example text arguments:
 
 ```json
